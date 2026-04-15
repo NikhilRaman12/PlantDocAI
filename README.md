@@ -1,3 +1,13 @@
+---
+title: PlantDocAI
+emoji: "🌾"
+colorFrom: green
+colorTo: teal
+sdk: streamlit
+app_file: app.py
+pinned: false
+---
+
 # PlantDocAI
 
 PlantDocAI is a farmer-focused RAG assistant for crop disease diagnosis, pest management, and practical treatment guidance. It combines Groq LLM responses with FAISS retrieval over agriculture PDFs.
