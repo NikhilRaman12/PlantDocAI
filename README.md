@@ -2,7 +2,7 @@
 title: PlantDocAI
 emoji: "🌾"
 colorFrom: green
-colorTo: teal
+colorTo: blue
 sdk: streamlit
 app_file: app.py
 pinned: false
