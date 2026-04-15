@@ -1,23 +1,35 @@
 import os
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 load_dotenv()
 
-# Load your documents
-loader = DirectoryLoader(
-    "data/",  # Change to your data folder path
-    glob="**/*.txt",  # Or *.pdf, *.csv, etc.
-    loader_cls=TextLoader
-)
-documents = loader.load()
+PDF_DIR = "file_path"
+
+# Load all PDFs from file_path/
+documents = []
+pdf_files = [f for f in os.listdir(PDF_DIR) if f.lower().endswith(".pdf")]
+print(f"Found {len(pdf_files)} PDFs: {pdf_files}")
+
+for pdf_file in pdf_files:
+    path = os.path.join(PDF_DIR, pdf_file)
+    try:
+        loader = PyPDFLoader(path)
+        docs = loader.load()
+        documents.extend(docs)
+        print(f"  Loaded {len(docs)} pages from {pdf_file}")
+    except Exception as e:
+        print(f"  WARN: could not load {pdf_file}: {e}")
+
+print(f"\nTotal pages loaded: {len(documents)}")
 
 # Split
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 chunks = splitter.split_documents(documents)
+print(f"Total chunks: {len(chunks)}")
 
 # Create embeddings
 embeddings = HuggingFaceEmbeddings(
@@ -28,4 +40,4 @@ embeddings = HuggingFaceEmbeddings(
 vectorstore = FAISS.from_documents(chunks, embeddings)
 vectorstore.save_local("faiss_index")
 
-print(f" Index rebuilt with {len(chunks)} chunks")
+print(f"\nIndex rebuilt successfully with {len(chunks)} chunks → faiss_index/")

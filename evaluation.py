@@ -1,115 +1,256 @@
 import json
+import re
 import time
-import math
-from generator import ResponseGenerator
+import types
 
-# RAGAS LLM-based metrics require a valid OpenAI key to run without hanging.
-# Set RAGAS_AVAILABLE = True and configure an LLM client when a key is available.
-RAGAS_AVAILABLE = False
 
-EVAL_QUERIES = [
-    "Symptoms of Fusarium wilt in tomato",
-    "Management of bacterial blight in rice",
-    "How to control powdery mildew in cucurbits?",
-    "Integrated pest management for cotton bollworm",
-    "Nutrient deficiency signs in groundnut"
+# ─────────────────────────────────────────────
+# SAFE LOADER  (avoids circular import)
+# ─────────────────────────────────────────────
+def load_generator():
+    with open("generator.py", "r", encoding="utf-8") as f:
+        code = f.read()
+    code = code.replace("from generator import ResponseGenerator", "")
+    mod = types.ModuleType("generator_fixed")
+    exec(code, mod.__dict__)
+    return mod.ResponseGenerator
+
+
+# ─────────────────────────────────────────────
+# CONFIG — one query per knowledge-base PDF
+# ─────────────────────────────────────────────
+TOP_K = 4
+COST_PER_1K_TOKENS = 0.5   # Groq free-tier placeholder
+
+QUERIES = [
+    # Banana.pdf
+    {
+        "query": "Symptoms and management of Panama disease in banana",
+        "source": "Banana.pdf",
+        "concepts": ["banana", "fusarium", "panama", "yellowing", "wilting"]
+    },
+    # biopesticides.pdf
+    {
+        "query": "How does neem-based biopesticide control crop pests?",
+        "source": "biopesticides.pdf",
+        "concepts": ["neem", "azadirachtin", "biopesticide", "pest", "spray"]
+    },
+    # cotton.pdf
+    {
+        "query": "Management of cotton bollworm using integrated pest management",
+        "source": "cotton.pdf",
+        "concepts": ["cotton", "bollworm", "ipm", "pheromone", "insecticide"]
+    },
+    # cucurbitaceous.pdf
+    {
+        "query": "Control of powdery mildew and downy mildew in cucurbits",
+        "source": "cucurbitaceous.pdf",
+        "concepts": ["cucurbit", "powdery mildew", "downy mildew", "fungicide", "spray"]
+    },
+    # diseasecausing_agents.pdf
+    {
+        "query": "Types of plant disease causing agents and their characteristics",
+        "source": "diseasecausing_agents.pdf",
+        "concepts": ["bacteria", "fungi", "virus", "pathogen", "disease"]
+    },
+    # diseases_horticulture.pdf
+    {
+        "query": "Common fungal diseases in horticulture crops and their treatment",
+        "source": "diseases_horticulture.pdf",
+        "concepts": ["horticulture", "fungal", "fruit", "vegetable", "disease"]
+    },
+    # disease_fieldcrops.pdf
+    {
+        "query": "Symptoms of rust and smut diseases in wheat and field crops",
+        "source": "disease_fieldcrops.pdf",
+        "concepts": ["wheat", "rust", "smut", "field", "disease"]
+    },
+    # insectpest_fieldcrops.pdf
+    {
+        "query": "Major insect pests attacking field crops and control measures",
+        "source": "insectpest_fieldcrops.pdf",
+        "concepts": ["aphid", "thrips", "pest", "field", "control"]
+    },
+    # IPM-Vegetables.pdf
+    {
+        "query": "Integrated pest management practices for vegetable crops",
+        "source": "IPM-Vegetables.pdf",
+        "concepts": ["ipm", "vegetable", "biological", "monitoring", "trap"]
+    },
+    # Organic-Farming.pdf
+    {
+        "query": "Role of compost and biofertilizers in organic farming",
+        "source": "Organic-Farming.pdf",
+        "concepts": ["organic", "compost", "biofertilizer", "soil", "farming"]
+    },
+    # pesticides_list_updated.pdf
+    {
+        "query": "Recommended fungicides and insecticides with dosage for crop protection",
+        "source": "pesticides_list_updated.pdf",
+        "concepts": ["fungicide", "insecticide", "dosage", "pesticide", "chemical"]
+    },
+    # plant_disease_management.pdf
+    {
+        "query": "Cultural and chemical methods for plant disease management",
+        "source": "plant_disease_management.pdf",
+        "concepts": ["cultural", "chemical", "management", "disease", "prevention"]
+    },
+    # Rice.pdf
+    {
+        "query": "Symptoms and management of rice blast and bacterial blight",
+        "source": "Rice.pdf",
+        "concepts": ["rice", "blast", "bacterial blight", "sheath", "fungicide"]
+    },
 ]
 
-GROUND_TRUTHS = {
-    "Symptoms of Fusarium wilt in tomato": "Fusarium wilt in tomato typically shows lower leaf yellowing, one-sided wilting, vascular browning in stem, stunted growth, and eventual plant collapse.",
-    "Management of bacterial blight in rice": "Manage bacterial blight in rice with resistant varieties, balanced fertilization (avoid excess nitrogen), clean field sanitation, proper spacing, and recommended bactericide practices where advised.",
-    "How to control powdery mildew in cucurbits?": "Control powdery mildew in cucurbits by using resistant varieties, reducing canopy humidity, removing infected plant parts, and applying suitable fungicides at recommended intervals.",
-    "Integrated pest management for cotton bollworm": "IPM for cotton bollworm includes pheromone traps, scouting and threshold-based action, conserving natural enemies, use of biocontrols, and need-based insecticide rotation.",
-    "Nutrient deficiency signs in groundnut": "Groundnut nutrient deficiency can include chlorosis, poor growth, leaf discoloration, and specific symptoms such as boron deficiency causing distorted young leaves and poor pod development."
-}
 
-def calculate_cost(prompt_tokens, completion_tokens, rate_prompt=0.0000015, rate_completion=0.000002):
-    return (prompt_tokens * rate_prompt) + (completion_tokens * rate_completion)
+# ─────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────
+def _clean(text: str) -> str:
+    return re.sub(r"[^a-z0-9\s]", " ", text.lower())
 
 
-def _sanitize_for_json(value):
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    if isinstance(value, dict):
-        return {k: _sanitize_for_json(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_for_json(v) for v in value]
-    return value
+def precision_at_k(docs, concepts: list, k: int) -> float:
+    if not docs:
+        return 0.0
+    hits = sum(
+        1 for doc in docs[:k]
+        if any(c in _clean(doc.page_content) for c in concepts)
+    )
+    return round(hits / k, 3)
 
+
+def recall_at_k(docs, concepts: list) -> float:
+    if not docs:
+        return 0.0
+    all_text = " ".join(_clean(d.page_content) for d in docs)
+    hits = sum(1 for c in concepts if c in all_text)
+    return round(hits / len(concepts), 3)
+
+
+def relevance_score(response: str, concepts: list) -> float:
+    text = _clean(response)
+    hits = sum(1 for c in concepts if c in text)
+    return round(hits / len(concepts), 3)
+
+
+def final_score(p: float, r: float, rel: float) -> float:
+    return round(p * 0.4 + r * 0.3 + rel * 0.3, 3)
+
+
+def estimate_tokens(text: str) -> int:
+    return len(text.split())
+
+
+def compute_cost(tokens: int) -> float:
+    return round((tokens / 1000) * COST_PER_1K_TOKENS, 4)
+
+
+def detect_mode(generator, context: str) -> str:
+    if generator.retriever is None:
+        return "LLM_ONLY"
+    if not context:
+        return "FALLBACK"
+    if len(context.strip()) < 100:
+        return "HYBRID"
+    return "RAG"
+
+
+# ─────────────────────────────────────────────
+# MAIN EVALUATION
+# ─────────────────────────────────────────────
 def run_evaluation():
+    ResponseGenerator = load_generator()
     generator = ResponseGenerator()
     results = []
-    ragas_data = {"question": [], "answer": [], "contexts": [], "ground_truth": []}
 
-    for query in EVAL_QUERIES:
+    for item in QUERIES:
+        query = item["query"]
+        concepts = item["concepts"]
+        source = item["source"]
+
+        print(f"\n{'='*60}")
+        print(f"Query  : {query}")
+        print(f"Source : {source}")
+        print("="*60)
+
         try:
+            docs = []
+            context = ""
+            if generator.retriever:
+                docs = generator.vectorstore.similarity_search(query, k=TOP_K)
+                context = generator.get_context(query) or ""
+
             start = time.time()
-            response = generator.run(query)
-            end = time.time()
+            response_obj = generator.run(query)
+            latency = round(time.time() - start, 3)
 
-            prompt_tokens = 0
-            completion_tokens = 0
-            total_tokens = prompt_tokens + completion_tokens
-            cost = calculate_cost(prompt_tokens, completion_tokens)
-            retrieved_contexts = generator.retrieve_documents(query) or []
-            ground_truth = GROUND_TRUTHS.get(query, "information not available")
+            response = response_obj.content
+            tokens = estimate_tokens(response)
 
-            ragas_data["question"].append(query)
-            ragas_data["answer"].append(response.content)
-            ragas_data["contexts"].append(retrieved_contexts)
-            ragas_data["ground_truth"].append(ground_truth)
+            p   = precision_at_k(docs, concepts, TOP_K)
+            r   = recall_at_k(docs, concepts)
+            rel = relevance_score(response, concepts)
+
+            detected_mode = getattr(response_obj, "mode", None) or detect_mode(generator, context)
 
             results.append({
-                "query": query,
-                "answer": response.content,
-                "contexts_count": len(retrieved_contexts),
-                "latency_seconds": round(end - start, 3),
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "estimated_cost_usd": round(cost, 6)
+                "query":            query,
+                "source_pdf":       source,
+                "mode":             detected_mode,
+                "precision_at_k":   p,
+                "recall_at_k":      r,
+                "relevance":        rel,
+                "final_score":      final_score(p, r, rel),
+                "latency_sec":      latency,
+                "tokens":           tokens,
+                "cost_usd":         compute_cost(tokens),
+                "contexts_count":   len(docs),
+                "response_preview": response[:300] + "..."
             })
 
-        except Exception as e:
-            results.append({"query": query, "error": str(e)})
+            print(f"  Mode={results[-1]['mode']}  P@K={p}  R@K={r}  Rel={rel}  Score={results[-1]['final_score']}  {latency}s")
 
-    if RAGAS_AVAILABLE:
-        try:
-            metrics = [ContextPrecisionWithReference(), ContextRecall()]
-            hf_dataset = HFDataset.from_dict(ragas_data)
-            ragas_results = evaluate(hf_dataset, metrics=metrics)
-            for i, r in enumerate(results):
-                if "error" not in r:
-                    r["context_precision"] = float(ragas_results["context_precision"][i])
-                    r["context_recall"] = float(ragas_results["context_recall"][i])
-        except Exception as e:
-            print(f"RAGAS evaluation skipped: {e}")
-            for r in results:
-                if "error" not in r:
-                    r["context_precision"] = None
-                    r["context_recall"] = None
-    else:
-        print("RAGAS not available — skipping metric evaluation")
-        for r in results:
-            if "error" not in r:
-                r["context_precision"] = None
-                r["context_recall"] = None
+        except Exception as exc:
+            print(f"  ERROR: {exc}")
+            results.append({"query": query, "source_pdf": source, "error": str(exc)})
 
-    valid_results = [r for r in results if "error" not in r]
-    precision_values = [r["context_precision"] for r in valid_results if r.get("context_precision") is not None]
-    recall_values = [r["context_recall"] for r in valid_results if r.get("context_recall") is not None]
+    return results
 
-    summary = {
-        "avg_latency": round(sum(r["latency_seconds"] for r in valid_results) / len(valid_results), 3) if valid_results else 0,
-        "avg_cost_usd": round(sum(r["estimated_cost_usd"] for r in valid_results) / len(valid_results), 6) if valid_results else 0,
-        "avg_context_precision": float(sum(precision_values) / len(precision_values)) if precision_values else None,
-        "avg_context_recall": float(sum(recall_values) / len(recall_values)) if recall_values else None
+
+def summarise(results: list) -> dict:
+    valid = [r for r in results if "error" not in r]
+    if not valid:
+        return {}
+
+    def avg(key):
+        return round(sum(r[key] for r in valid) / len(valid), 3)
+
+    return {
+        "total_queries":        len(results),
+        "successful":           len(valid),
+        "avg_precision_at_k":   avg("precision_at_k"),
+        "avg_recall_at_k":      avg("recall_at_k"),
+        "avg_relevance":        avg("relevance"),
+        "avg_final_score":      avg("final_score"),
+        "avg_latency_sec":      avg("latency_sec"),
+        "avg_cost_usd":         avg("cost_usd"),
     }
 
-    return _sanitize_for_json({"results": results, "summary": summary})
-
 if __name__ == "__main__":
-    eval_output = run_evaluation()
-    with open("results.json", "w") as f:
-        json.dump(eval_output, f, indent=2, allow_nan=False)
-    print("Evaluation complete. Results + summary saved to results.json")
+    results = run_evaluation()
+    summary = summarise(results)
+
+    output = {"results": results, "summary": summary}
+
+    for output_file in ("evaluation_results.json", "results.json"):
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(output, f, indent=2, ensure_ascii=False)
+
+    print("\n" + "="*60)
+    print("SUMMARY")
+    print("="*60)
+    for k, v in summary.items():
+        print(f"  {k:<25} {v}")
+    print("\nEvaluation complete. Saved to evaluation_results.json and results.json")
