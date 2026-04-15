@@ -1,16 +1,20 @@
 import os
+from typing import List, Optional
 from dotenv import load_dotenv
 
 from langchain_groq.chat_models import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-
-from retriever import Retriever
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # ── Load Environment ─────────────────────────────
 load_dotenv()
-api_key = os.getenv("RAG_API_KEY")
+groq_key = os.getenv("RAG_API_KEY")
+hf_key = os.getenv("HF_API_KEY")
+
+# Ensure HF_TOKEN is set for authenticated downloads
+if hf_key:
+    os.environ["HF_TOKEN"] = hf_key
 
 
 class ResponseGenerator:
@@ -20,11 +24,13 @@ class ResponseGenerator:
     """
 
     def __init__(self, llm_model_name="llama-3.3-70b-versatile", temperature=0.1):
+        self.last_mode = "INIT"
+
         # ── LLM ─────────────────────────────
         self.llm = ChatGroq(
             model=llm_model_name,
             temperature=temperature,
-            groq_api_key=api_key
+            groq_api_key=groq_key
         )
 
         # ── Embeddings ──────────────────────
@@ -44,7 +50,7 @@ class ResponseGenerator:
                     self.embeddings,
                     allow_dangerous_deserialization=True
                 )
-                self.retriever = Retriever(self.vectorstore)
+                self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 4})
             else:
                 self.vectorstore = None
                 self.retriever = None
@@ -64,20 +70,10 @@ class ResponseGenerator:
             - If context is missing → reply "information not available"
             - Reject unsafe, harmful, or irrelevant queries
 
-            META-FILTERS:
-            - Agricultural domain only (crops, soil, pests, diseases, management)
-            - Block queries about politics, personal health, or unrelated topics
-
             FORMATTING RULES:
             - For symptoms, treatments, or management → ALWAYS use markdown table format
             - For simple factual answers → 2-3 concise sentences
             - Support multilingual queries
-
-            EXAMPLE TABLE FORMAT:
-            | Aspect   | Details |
-            |----------|---------|
-            | Symptom 1 | Description |
-            | Symptom 2 | Description |
 
             Context:
             {context}
@@ -85,48 +81,50 @@ class ResponseGenerator:
             Question:
             {question}
 
-            Answer (use table format if question asks about symptoms, treatments, or management):
+            Answer:
             """
         )
 
-    # ── Retrieval ─────────────────────────────
-    def get_context(self, query):
+    def retrieve_documents(self, query: str) -> Optional[List[str]]:
         if not self.retriever:
             return None
 
-        docs = self.retriever.retrieve(query)
+        try:
+            docs = self.retriever.invoke(query)
+        except Exception as e:
+            print("Retriever failed:", e)
+            return None
 
-        if isinstance(docs, str):
-            return docs
+        if not docs:
+            return None
 
-        if docs and len(docs) > 0:
-            return "\n\n".join([doc.page_content for doc in docs])
+        filtered = [
+            doc.page_content.strip()
+            for doc in docs
+            if hasattr(doc, "page_content") and doc.page_content and len(doc.page_content.strip()) > 20
+        ]
+        return filtered if filtered else None
 
-        return None
+    # ── Retrieval ─────────────────────────────
+    def get_context(self, query):
+        docs = self.retrieve_documents(query)
+        if not docs:
+            return None
+        return "\n\n".join(docs)
 
     # ── Main Execution ───────────────────────
     def run(self, query):
-        # STEP 1: Retrieval
         context = self.get_context(query)
 
-        # Guardrail: Blocked query
-        if context == "query contains unsupported content":
-            return type("obj", (object,), {
-                "content": "query contains unsupported content"
-            })
-
-        # STEP 2: Strong Context → Pure RAG
         if context and len(context.strip()) > 100:
+            self.last_mode = "RAG"
             print("MODE: RAG")
             chain = self.rag_prompt | self.llm
-            response = chain.invoke({
-                "context": context,
-                "question": query
-            })
-            return type("obj", (object,), {"content": response.content})
+            response = chain.invoke({"context": context, "question": query})
+            return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
 
-        # STEP 3: Weak Context → Hybrid
         if context:
+            self.last_mode = "HYBRID"
             print("MODE: HYBRID")
             hybrid_prompt = f"""
             SYSTEM ROLE: You are Krishi Seva AI – Bharat, a professional agricultural expert.
@@ -135,11 +133,6 @@ class ResponseGenerator:
             - Use context FIRST, then external knowledge ONLY if needed
             - Block unsafe or irrelevant queries
             - Follow formatting rules strictly
-
-            FORMATTING RULES:
-            - For symptoms, treatments, management → Markdown table
-            - For simple questions → 2-3 sentences
-            - Support multilingual queries
 
             Context:
             {context}
@@ -150,9 +143,9 @@ class ResponseGenerator:
             Answer:
             """
             response = self.llm.invoke(hybrid_prompt)
-            return type("obj", (object,), {"content": response.content})
+            return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
 
-        # STEP 4: No Context → Fallback
+        self.last_mode = "LLM_FALLBACK"
         print("MODE: LLM FALLBACK")
         fallback_prompt = f"""
         SYSTEM ROLE: You are Krishi Seva AI – Bharat, a professional agricultural expert.
@@ -162,18 +155,24 @@ class ResponseGenerator:
         - Block unsafe or irrelevant queries
         - Follow formatting rules strictly
 
-        FORMATTING RULES:
-        - For symptoms, treatments, management → Markdown table
-        - For simple questions → 2-3 sentences
-        - Support multilingual queries
-
         Question:
         {query}
 
         Answer:
         """
         response = self.llm.invoke(fallback_prompt)
-        return type("obj", (object,), {"content": response.content})
+        return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
+
+    def generate_response(self, question, docs=None):
+        """Compatibility wrapper for API callers expecting plain string output."""
+        if docs and str(docs).strip():
+            chain = self.rag_prompt | self.llm
+            response = chain.invoke({"context": str(docs), "question": question})
+            self.last_mode = "RAG"
+            return response.content
+
+        result = self.run(question)
+        return getattr(result, "content", str(result))
 
 
 # ── Test ─────────────────────────────
@@ -182,4 +181,3 @@ if __name__ == "__main__":
     query = "Symptoms of Fusarium wilt in tomato"
     result = generator.run(query)
     print(result.content)
-    

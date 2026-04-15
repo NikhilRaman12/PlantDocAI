@@ -1,0 +1,70 @@
+{
+  "results": [
+    {
+      "query": "Symptoms of Fusarium wilt in tomato",
+      "answer": "| Symptom | Description |\n| --- | --- |\n| Yellowing of leaves | Yellowing of the upper leaves that turn yellow and droop |\n| Wilting | Wilting of the plant |\n| Vascular discoloration | Reddish brown discoloration of the vascular system |\n| Stunting | Stunting of the plant |\n| Water stress | Plants may appear water stressed |",
+      "contexts_count": 4,
+      "latency_seconds": 1.095,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "estimated_cost_usd": 0.0,
+      "context_precision": null,
+      "context_recall": null
+    },
+    {
+      "query": "Management of bacterial blight in rice",
+      "answer": "### Management of Bacterial Blight in Rice\n| Management Practice | Description |\n| --- | --- |\n| **Integrated Pest Management (IPM)** | Combine physical, cultural, biological, and chemical controls to manage bacterial blight |\n| **Cultural Controls** | Use resistant varieties, practice crop rotation, and maintain good soil health |\n| **Biological Controls** | Utilize antagonistic bacteria, such as those isolated from seeds, to control the disease |\n| **Chemical Controls** | Apply bactericides as needed, following recommended application rates and timings |\n| **Nutrient Management** | Maintain optimal potassium levels, as potassium deficiency can increase susceptibility to bacterial blight |",
+      "contexts_count": 4,
+      "latency_seconds": 1.05,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "estimated_cost_usd": 0.0,
+      "context_precision": null,
+      "context_recall": null
+    },
+    {
+      "query": "How to control powdery mildew in cucurbits?",
+      "answer": "To control powdery mildew in cucurbits, the following methods can be used:\n### Cultural Control\n* Plant resistant varieties\n* Increase air movement inside the canopy\n* Trellising cucumbers\n* Avoiding overhead irrigation or irrigating only in the late morning hours\n\n### Chemical Control\n| Chemical | Dosage | Water Volume |\n| --- | --- | --- |\n| Carbendazim 50% WP | 120 g | 240 l/acre |\n| Benomyl 50% WP | 80 g | 200 l/acre |\n| Thiophanate methyl 70% WP | 572 g | 400 l/acre |\n| Mancozeb | 0.25% | - |\n| Metalaxyl + Mancozeb | 0.2% | - |",
+      "contexts_count": 4,
+      "latency_seconds": 1.14,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "estimated_cost_usd": 0.0,
+      "context_precision": null,
+      "context_recall": null
+    },
+    {
+      "query": "Integrated pest management for cotton bollworm",
+      "answer": "### Integrated Pest Management for Cotton Bollworm\n| Method | Description | Target |\n| --- | --- | --- |\n| Biological Control | Use of predators and parasites such as *Microchelonus versatilis*, *B. apanteles*, and *B. nephantidis* | Egg-Larva, Pupa |\n| Cultural Control | Use pheromone traps for monitoring, physical collection and destruction of grown up larvae | Larva |\n| Chemical Control | Need-based application of recommended insecticides, spray keeping IRM strategies in focus | Larva |\n| Botanical Control | Planting of insectory plants such as Cosmos, Sunflower, Okra, Hibiscus, and Marigold | Larva |",
+      "contexts_count": 4,
+      "latency_seconds": 0.875,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "estimated_cost_usd": 0.0,
+      "context_precision": null,
+      "context_recall": null
+    },
+    {
+      "query": "Nutrient deficiency signs in groundnut",
+      "answer": "| Nutrient | Deficiency Symptoms |\n| --- | --- |\n| Boron | The bases of young leaves of terminal buds become light green and finally breakdown. Stems and leaves become distorted. Plants are stunted. Fruits, fleshy roots or stems, etc., may crack on the surface and/or rot in the center. |",
+      "contexts_count": 4,
+      "latency_seconds": 0.653,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "estimated_cost_usd": 0.0,
+      "context_precision": null,
+      "context_recall": null
+    }
+  ],
+  "summary": {
+    "avg_latency": 0.963,
+    "avg_cost_usd": 0.0,
+    "avg_context_precision": null,
+    "avg_context_recall": null
+  }
+}

@@ -1,29 +1,37 @@
 import os
+from typing import List
+
 from langchain_community.document_loaders import PyPDFLoader
 
-# Use the actual folder where your PDFs are stored
-file_path = r"C:\Users\Nikhil Raman K\OneDrive\Documents\Raman_Py_Vscode\GenAi_Projects\PlantDocAi\file_path"
 
-print("Checking folder:", file_path)
+class DataLoader:
+    def __init__(self, file_path: str):
+        self.file_path = file_path
 
-if not os.path.exists(file_path):
-    print("Folder NOT found")
-else:
-    files = os.listdir(file_path)
-    print("Files found:", files)
+    def load_pdfs(self) -> List:
+        if not os.path.exists(self.file_path):
+            print(f"Folder not found: {self.file_path}")
+            return []
 
-    for file in files:
-        if file.lower().endswith(".pdf"):
-            print(f"Processing: {file}")
+        all_docs = []
+        files = os.listdir(self.file_path)
+        print("Files found:", files)
 
-            pdf_path = os.path.join(file_path, file)
-            loader = PyPDFLoader(pdf_path)
-            docs = loader.load()
+        for file in files:
+            if file.lower().endswith(".pdf"):
+                pdf_path = os.path.join(self.file_path, file)
+                print(f"Processing: {file}")
+                docs = PyPDFLoader(pdf_path).load()
+                all_docs.extend(docs)
+                print(f"{file} -> {len(docs)} pages loaded")
 
-            print(f"{file} -> {len(docs)} pages loaded")
+        return all_docs
 
-            if docs:
-                # Preview the first 200 characters of the first page
-                print("Preview:", docs[0].page_content[:200])
 
-            print("-" * 40)
+if __name__ == "__main__":
+    file_path = r"C:\Users\Nikhil Raman K\OneDrive\Documents\Raman_Py_Vscode\GenAi_Projects\PlantDocAi\file_path"
+    loader = DataLoader(file_path)
+    documents = loader.load_pdfs()
+    print(f"Total pages loaded: {len(documents)}")
+    if documents:
+        print("Preview:", documents[0].page_content[:200])

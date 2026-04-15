@@ -98,13 +98,14 @@ if ask_clicked:
                     generator = ResponseGenerator()
                     result = generator.run(query)
                     answer = getattr(result, "content", str(result))
+                    mode = getattr(result, "mode", None)
 
                 # Detection logic for mode
-                if "MODE: RAG" in answer:
+                if mode == "RAG":
                     st.success("Answer from knowledge base")
-                elif "MODE: HYBRID" in answer:
+                elif mode == "HYBRID":
                     st.info("Answer from hybrid knowledge")
-                elif "MODE: LLM FALLBACK" in answer:
+                elif mode == "LLM_FALLBACK":
                     st.warning("Answer from general knowledge")
                 else:
                     st.info("Response generated")
