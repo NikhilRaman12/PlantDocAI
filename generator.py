@@ -9,12 +9,6 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 # ── Load Environment ─────────────────────────────
 load_dotenv()
-groq_key = os.getenv("RAG_API_KEY")
-hf_key = os.getenv("HF_API_KEY")
-
-# Ensure HF_TOKEN is set for authenticated downloads
-if hf_key:
-    os.environ["HF_TOKEN"] = hf_key
 
 
 class ResponseGenerator:
@@ -26,11 +20,21 @@ class ResponseGenerator:
     def __init__(self, llm_model_name="llama-3.3-70b-versatile", temperature=0.1):
         self.last_mode = "INIT"
 
+        # Refresh env values per instance so key rotation is picked up after restart.
+        self.groq_key = os.getenv("RAG_API_KEY") or os.getenv("GROQ_API_KEY")
+        self.hf_key = os.getenv("HF_API_KEY")
+
+        if self.hf_key:
+            os.environ["HF_TOKEN"] = self.hf_key
+
+        if not self.groq_key:
+            raise ValueError("Groq API key missing. Set RAG_API_KEY (or GROQ_API_KEY) in .env.")
+
         # ── LLM ─────────────────────────────
         self.llm = ChatGroq(
             model=llm_model_name,
             temperature=temperature,
-            groq_api_key=groq_key
+            groq_api_key=self.groq_key
         )
 
         # ── Embeddings ──────────────────────
@@ -116,52 +120,60 @@ class ResponseGenerator:
     def run(self, query):
         context = self.get_context(query)
 
-        if context and len(context.strip()) > 100:
-            self.last_mode = "RAG"
-            print("MODE: RAG")
-            chain = self.rag_prompt | self.llm
-            response = chain.invoke({"context": context, "question": query})
-            return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
+        try:
+            if context and len(context.strip()) > 100:
+                self.last_mode = "RAG"
+                print("MODE: RAG")
+                chain = self.rag_prompt | self.llm
+                response = chain.invoke({"context": context, "question": query})
+                return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
 
-        if context:
-            self.last_mode = "HYBRID"
-            print("MODE: HYBRID")
-            hybrid_prompt = f"""
+            if context:
+                self.last_mode = "HYBRID"
+                print("MODE: HYBRID")
+                hybrid_prompt = f"""
+                SYSTEM ROLE: You are Krishi Seva AI – Bharat, a professional agricultural expert.
+
+                RULES:
+                - Use context FIRST, then external knowledge ONLY if needed
+                - Block unsafe or irrelevant queries
+                - Follow formatting rules strictly
+
+                Context:
+                {context}
+
+                Question:
+                {query}
+
+                Answer:
+                """
+                response = self.llm.invoke(hybrid_prompt)
+                return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
+
+            self.last_mode = "LLM_FALLBACK"
+            print("MODE: LLM FALLBACK")
+            fallback_prompt = f"""
             SYSTEM ROLE: You are Krishi Seva AI – Bharat, a professional agricultural expert.
 
             RULES:
-            - Use context FIRST, then external knowledge ONLY if needed
+            - If unsure → reply "information not available"
             - Block unsafe or irrelevant queries
             - Follow formatting rules strictly
-
-            Context:
-            {context}
 
             Question:
             {query}
 
             Answer:
             """
-            response = self.llm.invoke(hybrid_prompt)
+            response = self.llm.invoke(fallback_prompt)
             return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
-
-        self.last_mode = "LLM_FALLBACK"
-        print("MODE: LLM FALLBACK")
-        fallback_prompt = f"""
-        SYSTEM ROLE: You are Krishi Seva AI – Bharat, a professional agricultural expert.
-
-        RULES:
-        - If unsure → reply "information not available"
-        - Block unsafe or irrelevant queries
-        - Follow formatting rules strictly
-
-        Question:
-        {query}
-
-        Answer:
-        """
-        response = self.llm.invoke(fallback_prompt)
-        return type("obj", (object,), {"content": response.content, "mode": self.last_mode})
+        except Exception as e:
+            msg = str(e)
+            if "invalid_api_key" in msg or "401" in msg:
+                raise RuntimeError(
+                    "Invalid Groq API key (401). Update RAG_API_KEY in .env and restart the app."
+                ) from e
+            raise
 
     def generate_response(self, question, docs=None):
         """Compatibility wrapper for API callers expecting plain string output."""
